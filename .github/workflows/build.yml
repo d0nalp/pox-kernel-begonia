@@ -16,7 +16,7 @@ jobs:
     name: Build begonia kernel
     runs-on: ubuntu-latest
     env:
-      KERNEL_NAME: PoWeR-Kernel-begonia
+      KERNEL_NAME: MeTh-Kernel-begonia
       TC_ROOT: ${{ github.workspace }}/toolchains
       OUT_DIR: out
       CLANG_VER: clang-r383902
@@ -65,8 +65,8 @@ jobs:
       - name: Upload flashable zip
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.KERNEL_NAME }}
-          path: ${{ env.KERNEL_NAME }}-*.zip
+          name: MeTh-Kernel-begonia-flashable
+          path: MeTh-Kernel-begonia-*.zip
           if-no-files-found: error
 
       - name: Upload Image.gz-dtb

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# build.sh - PoWeR kernel builder for begonia (Redmi Note 8 Pro, MT6785)
+# build.sh - MeTh kernel builder for begonia (Redmi Note 8 Pro, MT6785)
 #
 # Builds the kernel with a pinned Android clang + GCC binutils toolchain and
 # packages a flashable AnyKernel3 zip.
