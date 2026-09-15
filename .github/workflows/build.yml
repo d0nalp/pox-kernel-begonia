@@ -109,7 +109,7 @@ jobs:
 
       # Release assets download directly (no wrapper zip).
       # Runs ONLY for a v* tag push or a manual dispatch with release=true, so
-      # nothing is published until the build has been verified on dynamic ROMs.
+      # nothing is published until the build has been verified on device.
       #  - tag push (v*)  -> release named after the tag, versioned asset name
       #  - manual release -> rolling "latest" release with a stable asset name,
       #                      so this URL always serves the newest build:

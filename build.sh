@@ -47,6 +47,11 @@ CLANG_TRIPLE=aarch64-linux-gnu-
 CROSS_COMPILE=aarch64-linux-android-
 DEFCONFIG="${DEFCONFIG:-begonia_apatch_defconfig}"
 
+# Brand the kernel banner. scripts/mkcompile_h falls back to hardcoded
+# upstream values ("Saikrishna1504@Lab") when these are unset, so the
+# built kernel would otherwise identify with upstream's build user/host.
+export KBUILD_BUILD_USER="${KBUILD_BUILD_USER:-requiredroot}"
+export KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST:-MeTh}"
 log() { printf '\033[1;32m[*] %s\033[0m\n' "$*"; }
 
 mkdir -p "$TC_ROOT"
@@ -123,6 +128,7 @@ prepare_config() {
         log "Toolchain rejects repeated -mllvm thresholds - disabling CONFIG_INLINE_OPTIMIZATION"
         ./scripts/config --file "$OUT_DIR/.config" --disable INLINE_OPTIMIZATION
     fi
+    # shellcheck disable=SC2086  # EXTRA_FLAGS is intentionally word-split
     make O="$OUT_DIR" ARCH="$ARCH" CC="$CC" \
         CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
         $EXTRA_FLAGS olddefconfig
@@ -138,10 +144,12 @@ build_kernel() {
     fi
     mkdir -p "$ROOT_DIR/$OUT_DIR"
     cd "$ROOT_DIR"
+    # shellcheck disable=SC2086  # EXTRA_FLAGS is intentionally word-split
     make O="$OUT_DIR" ARCH="$ARCH" CC="$bcc" \
         CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
         $EXTRA_FLAGS "$DEFCONFIG"
     prepare_config
+    # shellcheck disable=SC2086  # EXTRA_FLAGS is intentionally word-split
     make O="$OUT_DIR" ARCH="$ARCH" CC="$bcc" \
         CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
         $EXTRA_FLAGS -j"$JOBS"
@@ -183,6 +191,8 @@ supported.patchlevels=
 
 ## shell variables
 BLOCK=/dev/block/by-name/boot;
+# begonia (Redmi Note 8 Pro) is an A-only device: a single boot partition,
+# no A/B slot suffix. Keep IS_SLOT_DEVICE=0 (AnyKernel3 default for A-only).
 IS_SLOT_DEVICE=0;
 RAMDISK_COMPRESSION=auto;
 PATCH_VBMETA_FLAG=auto;
