@@ -352,6 +352,26 @@ on property:sys.gamespace.mode=1
 on property:sys.gamespace.mode=0
     setprop persist.sys.power_mode_perf 0
 
+on property:sys.gamespace.in_game=1
+    setprop persist.sys.power_mode_perf 1
+
+on property:sys.gamespace.in_game=0
+    setprop persist.sys.power_mode_perf 0
+
+# AOSP / PixelOS / LineageOS libperfmgr PowerHAL trigger
+on property:vendor.powerhal.state=SUSTAINED_PERFORMANCE
+    setprop persist.sys.power_mode_perf 1
+
+on property:vendor.powerhal.state=""
+    setprop persist.sys.power_mode_perf 0
+
+# MIUI / HyperOS Performance Mode trigger
+on property:persist.sys.perf_mode=1
+    setprop persist.sys.power_mode_perf 1
+
+on property:persist.sys.perf_mode=0
+    setprop persist.sys.power_mode_perf 0
+
 # Direct debug toggle
 on property:debug.gaming.mode=1
     setprop persist.sys.power_mode_perf 1
