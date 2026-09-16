@@ -289,7 +289,7 @@ on boot
     write /proc/sys/vm/watermark_scale_factor 150
     write /proc/sys/vm/page-cluster 0
     write /proc/sys/vm/vfs_cache_pressure 60
-    write /proc/sys/vm/swappiness 80
+    write /proc/sys/vm/swappiness 100
     write /proc/sys/vm/dirty_ratio 15
     write /proc/sys/vm/dirty_background_ratio 5
 
@@ -298,7 +298,7 @@ on property:sys.boot_completed=1
     write /proc/sys/vm/watermark_scale_factor 150
     write /proc/sys/vm/page-cluster 0
     write /proc/sys/vm/vfs_cache_pressure 60
-    write /proc/sys/vm/swappiness 80
+    write /proc/sys/vm/swappiness 100
 RC_EOF
     chmod 644 \$RAMDISK/init.memory_enhanced.rc
     if [ -f "\$RAMDISK/init.rc" ]; then
