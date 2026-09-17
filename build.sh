@@ -24,45 +24,47 @@ JOBS="${JOBS:-$(nproc)}"
 EXTRA_FLAGS="${EXTRA_FLAGS:-}"
 DATE="$(date +%Y%m%d-%H%M)"
 
-# Branch Edition / Codename (Rocks theme: Granite, Obsidian, Onyx)
-if [[ -z "${BRANCH_CODENAME:-}" ]]; then
-    CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "gaming")"
-    case "$CURRENT_BRANCH" in
+# Git Metadata: Branch & Commit ID
+GIT_BRANCH="${GIT_BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "gaming")}"
+COMMIT_HASH="${COMMIT_HASH:-$(git rev-parse --short HEAD 2>/dev/null || echo "custom")}"
+COMMIT_DATE="$(git log -1 --format=%cd --date=format:'%Y-%m-%d %H:%M' 2>/dev/null || date +'%Y-%m-%d %H:%M')"
+COMMIT_SUBJECT="$(git log -1 --format=%s 2>/dev/null || echo "Release build")"
+
+# Version Name / Codename (Rocks theme: Granite, Obsidian, Onyx)
+if [[ -z "${VERSION_NAME:-}" ]]; then
+    case "$GIT_BRANCH" in
         main|granite)
-            BRANCH_CODENAME="Granite"
+            VERSION_NAME="Granite"
             BRANCH_DESC="Rock-Solid Stability Edition"
             ;;
         memory-enhanced|obsidian)
-            BRANCH_CODENAME="Obsidian"
+            VERSION_NAME="Obsidian"
             BRANCH_DESC="iOS-Style Compressed Memory Edition"
             ;;
         gaming|onyx|*)
-            BRANCH_CODENAME="Onyx"
+            VERSION_NAME="Onyx"
             BRANCH_DESC="Zero Frame-Drop Gaming Edition"
             ;;
     esac
 else
     BRANCH_DESC="${BRANCH_DESC:-Custom Edition}"
 fi
+BRANCH_CODENAME="$VERSION_NAME"
 
-# Derive dynamic localversion string (e.g. "-Pox-Onyx-0.9" or "-Pox-0.9")
+# Derive dynamic localversion string: contains name, version, version name, branch, commit id
 if [[ -n "${LOCALVERSION:-}" ]]; then
     CUSTOM_LOCALVERSION="$LOCALVERSION"
-elif [[ -n "$BRANCH_CODENAME" && -n "$KERNEL_VERSION" ]]; then
-    CUSTOM_LOCALVERSION="-${KERNEL_NAME}-${BRANCH_CODENAME}-${KERNEL_VERSION}"
-elif [[ -n "$KERNEL_VERSION" ]]; then
-    CUSTOM_LOCALVERSION="-${KERNEL_NAME}-${KERNEL_VERSION}"
 else
-    CUSTOM_LOCALVERSION="-${KERNEL_NAME}"
+    CUSTOM_LOCALVERSION="-${KERNEL_NAME}-${KERNEL_VERSION}-${VERSION_NAME}-${GIT_BRANCH}-${COMMIT_HASH}"
 fi
 
-# Derive zip package base name dynamically (e.g. "Pox-Onyx-0.9-begonia")
+# Package zip base name: contains name, version, version name, branch, commit id, device
 if [[ -n "${PACKAGE_NAME:-}" ]]; then
     ZIP_BASE="$PACKAGE_NAME"
 elif [[ "$KERNEL_NAME" == *"$DEVICE_CODENAME"* ]]; then
-    ZIP_BASE="${KERNEL_NAME}${BRANCH_CODENAME:+-${BRANCH_CODENAME}}${KERNEL_VERSION:+-${KERNEL_VERSION}}"
+    ZIP_BASE="${KERNEL_NAME}-${KERNEL_VERSION}-${VERSION_NAME}-${GIT_BRANCH}-${COMMIT_HASH}"
 else
-    ZIP_BASE="${KERNEL_NAME}${BRANCH_CODENAME:+-${BRANCH_CODENAME}}${KERNEL_VERSION:+-${KERNEL_VERSION}}-${DEVICE_CODENAME}"
+    ZIP_BASE="${KERNEL_NAME}-${KERNEL_VERSION}-${VERSION_NAME}-${GIT_BRANCH}-${COMMIT_HASH}-${DEVICE_CODENAME}"
 fi
 
 log()  { printf '\033[1;32m[*] %s\033[0m\n' "$*"; }
@@ -157,11 +159,15 @@ run_menuconfig() {
 
 build_kernel() {
     log "================================================="
-    log "Building $KERNEL_NAME ${KERNEL_VERSION:+$KERNEL_VERSION }"
+    log "Building $KERNEL_NAME"
+    log "Version:      $KERNEL_VERSION"
+    log "Version Name: $VERSION_NAME ($BRANCH_DESC)"
+    log "Branch:       $GIT_BRANCH"
+    log "Commit ID:    $COMMIT_HASH"
     log "Device:       $DEVICE_NAME ($DEVICE_CODENAME)"
     log "Maintainer:   $MAINTAINER"
-    log "Defconfig:    $DEFCONFIG"
     log "Localversion: $CUSTOM_LOCALVERSION"
+    log "Defconfig:    $DEFCONFIG"
     log "Output Dir:   $BUILD_DIR"
     log "Object Dir:   $OUT_DIR"
     log "Jobs:         $JOBS"
@@ -241,11 +247,12 @@ package_zip() {
     kver="4.14.$(grep -m1 '^SUBLEVEL =' "$ROOT_DIR/Makefile" | awk '{print $3}')"
     toolchain_ver="Clang 11.0.1 + GCC 9.3"
 
-    local kernel_name_upper branch_codename_upper
+    local kernel_name_upper version_name_upper
     kernel_name_upper="$(echo "$KERNEL_NAME" | tr '[:lower:]' '[:upper:]')"
-    branch_codename_upper="$(echo "$BRANCH_CODENAME" | tr '[:lower:]' '[:upper:]')"
-    local full_title="${KERNEL_NAME} Kernel ${KERNEL_VERSION}"
-    [[ -n "$BRANCH_CODENAME" ]] && full_title+=" [${BRANCH_CODENAME}]"
+    version_name_upper="$(echo "$VERSION_NAME" | tr '[:lower:]' '[:upper:]')"
+    local full_title="${KERNEL_NAME} Kernel ${KERNEL_VERSION} [${VERSION_NAME}]"
+    local kver="4.14.$(grep -m1 '^SUBLEVEL =' "$ROOT_DIR/Makefile" | awk '{print $3}')"
+    local toolchain_ver="Clang 11.0.1 + GCC 9.3"
 
     # Generate dynamic changelog ui_print statements for TWRP
     local changelog_ui=""
@@ -254,17 +261,19 @@ package_zip() {
         local escaped_line
         escaped_line="$(echo "$line" | sed 's/"/\\"/g')"
         changelog_ui+="ui_print \"   * ${escaped_line}\";\n"
-    done < <(git log -n 8 --pretty=format:"[%h] %s" 2>/dev/null || echo "[custom] Initial ${KERNEL_NAME} ${BRANCH_CODENAME} release")
+    done < <(git log -n 8 --pretty=format:"[%h] %s" 2>/dev/null || echo "[custom] Initial ${KERNEL_NAME} ${VERSION_NAME} release")
 
     # Generate standalone CHANGELOG.txt for the flashable zip
     {
         echo "========================================================"
-        echo " ${kernel_name_upper} KERNEL ${KERNEL_VERSION} [${branch_codename_upper}] - ${DEVICE_NAME} (${DEVICE_CODENAME})"
-        echo " Edition: $BRANCH_CODENAME ($BRANCH_DESC)"
+        echo " ${kernel_name_upper} KERNEL ${KERNEL_VERSION} [${version_name_upper}] - ${DEVICE_NAME} (${DEVICE_CODENAME})"
+        echo " Version: $KERNEL_VERSION"
+        echo " Version Name: $VERSION_NAME ($BRANCH_DESC)"
+        echo " Branch: $GIT_BRANCH"
+        echo " Commit ID: $COMMIT_HASH"
         echo " Maintainer: $MAINTAINER"
         echo " Motto: We aim for stability, not for anything else."
-        echo " Branch: $git_branch"
-        echo " Linux: v$kver | Build: $commit_hash | Date: $commit_date"
+        echo " Linux: v$kver | Date: $COMMIT_DATE"
         echo " Toolchain: $toolchain_ver"
         echo " Defconfig: $DEFCONFIG (APatch ready)"
         echo " Memory: iOS-Style On-Demand Multi-Stream Compressed ZRAM"
@@ -282,7 +291,7 @@ package_zip() {
 
 ## AnyKernel setup
 properties() { '
-kernel.string=${full_title} by ${MAINTAINER} for ${DEVICE_NAME} (${DEVICE_CODENAME})
+kernel.string=${KERNEL_NAME} ${KERNEL_VERSION} [${VERSION_NAME}] (${GIT_BRANCH}-${COMMIT_HASH}) by ${MAINTAINER} for ${DEVICE_NAME} (${DEVICE_CODENAME})
 do.devicecheck=1
 do.modules=0
 do.systemless=0
@@ -311,27 +320,27 @@ PATCH_VBMETA_FLAG=auto;
 ## TWRP / Recovery UI Banner & Version Details
 ui_print " ";
 ui_print " ============================================";
-ui_print "       ${kernel_name_upper} KERNEL ${KERNEL_VERSION} [${branch_codename_upper}]";
+ui_print "   ${kernel_name_upper} KERNEL ${KERNEL_VERSION} [${version_name_upper}]";
 ui_print " ============================================";
-ui_print "  * Kernel     : ${KERNEL_NAME}              ";
-ui_print "  * Edition    : ${BRANCH_CODENAME} (${BRANCH_DESC})";
-ui_print "  * Version    : ${KERNEL_VERSION}           ";
-ui_print "  * Device     : ${DEVICE_NAME} (${DEVICE_CODENAME})";
-ui_print "  * Maintainer : ${MAINTAINER}               ";
-ui_print "  * Motto      : We aim for stability,       ";
-ui_print "                 not for anything else.      ";
-ui_print "  * Branch     : $git_branch                 ";
-ui_print "  * Linux Ver  : $kver                       ";
-ui_print "  * Build Hash : $commit_hash                ";
-ui_print "  * Build Date : $commit_date                ";
-ui_print "  * Toolchain  : $toolchain_ver              ";
-ui_print "  * Features   : APatch / KernelPatch ready  ";
-ui_print "  * Mem Engine : iOS-Style On-Demand ZRAM    ";
-ui_print "  * Game Engine: Zero Frame-Drop Gaming Mode ";
-ui_print "  * Perf Mode  : ROM Performance Auto-Trigger";
+ui_print "  * Kernel       : ${KERNEL_NAME}            ";
+ui_print "  * Version      : ${KERNEL_VERSION}         ";
+ui_print "  * Version Name : ${VERSION_NAME} (${BRANCH_DESC})";
+ui_print "  * Branch       : ${GIT_BRANCH}             ";
+ui_print "  * Commit ID    : ${COMMIT_HASH}            ";
+ui_print "  * Device       : ${DEVICE_NAME} (${DEVICE_CODENAME})";
+ui_print "  * Maintainer   : ${MAINTAINER}             ";
+ui_print "  * Motto        : We aim for stability,     ";
+ui_print "                   not for anything else.    ";
+ui_print "  * Linux Ver    : $kver                     ";
+ui_print "  * Build Date   : $COMMIT_DATE              ";
+ui_print "  * Toolchain    : $toolchain_ver            ";
+ui_print "  * Features     : APatch / KernelPatch ready";
+ui_print "  * Mem Engine   : iOS-Style On-Demand ZRAM  ";
+ui_print "  * Game Engine  : Zero Frame-Drop Gaming Mode";
+ui_print "  * Perf Mode    : ROM Performance Auto-Trigger";
 ui_print " --------------------------------------------";
 ui_print "  LATEST COMMIT:";
-ui_print "  $commit_subject";
+ui_print "  $COMMIT_SUBJECT";
 ui_print " --------------------------------------------";
 ui_print "  CHANGELOG (Recent Changes):";
 \$(printf '%b' "$changelog_ui")
@@ -453,7 +462,7 @@ RC_EOF
     fi
 fi
 
-ui_print " [*] [3/4] Repacking boot image with ${KERNEL_NAME} ${BRANCH_CODENAME} (${KERNEL_VERSION})...";
+ui_print " [*] [3/4] Repacking boot image with ${KERNEL_NAME} ${VERSION_NAME} (${KERNEL_VERSION})...";
 ui_print "     - Linux kernel: v$kver (MT6785 / Helio G90T)";
 ui_print "     - Low-battery call reboot fix: active";
 ui_print "     - Low-battery lag/throttling fix: active";
@@ -467,7 +476,8 @@ write_boot;
 ui_print " [*] [4/4] Cleaning up temporary installer files...";
 ui_print " ";
 ui_print " ============================================";
-ui_print "   ${kernel_name_upper} ${branch_codename_upper} ${KERNEL_VERSION} INSTALLED! ";
+ui_print "   ${kernel_name_upper} ${version_name_upper} ${KERNEL_VERSION} (${GIT_BRANCH}) INSTALLED!";
+ui_print "   Commit: ${COMMIT_HASH}";
 ui_print "   We aim for stability, not for anything else.";
 ui_print "      Reboot and enjoy solid stability.      ";
 ui_print " ============================================";
@@ -475,24 +485,23 @@ ui_print " ";
 ## end install
 AK_EOF
 
-    local zip_file="$BUILD_DIR/${ZIP_BASE}-${commit_hash}.zip"
+    local zip_file="$BUILD_DIR/${ZIP_BASE}.zip"
     log "Packaging AnyKernel3 flashable zip: $zip_file"
     (cd "$stage" && zip -r9 "$zip_file" . -x '*.git*' -x '.github*')
     rm -rf "$stage"
 
     # Also maintain latest.zip, versioned zip, and date-stamped copies in build/
-    cp -f "$zip_file" "$BUILD_DIR/${ZIP_BASE}-${DATE}.zip"
-    cp -f "$zip_file" "$BUILD_DIR/${ZIP_BASE}.zip"
+    cp -f "$zip_file" "$BUILD_DIR/${KERNEL_NAME}-${KERNEL_VERSION}-${VERSION_NAME}-${GIT_BRANCH}-${DATE}.zip"
+    cp -f "$zip_file" "$BUILD_DIR/${KERNEL_NAME}-${KERNEL_VERSION}-${VERSION_NAME}-${GIT_BRANCH}-${DEVICE_CODENAME}.zip"
     ln -sf "$(basename "$zip_file")" "$BUILD_DIR/latest.zip"
-    ln -sf "$(basename "$zip_file")" "$BUILD_DIR/$commit_hash.zip"
+    ln -sf "$(basename "$zip_file")" "$BUILD_DIR/${COMMIT_HASH}.zip"
 
     log "================================================="
     log "BUILD SUCCEEDED!"
-    log "Version ZIP:   $BUILD_DIR/${ZIP_BASE}.zip"
-    log "Commit ZIP:    $zip_file"
-    log "Short link:    $BUILD_DIR/$commit_hash.zip"
-    log "Latest link:   $BUILD_DIR/latest.zip"
-    log "Date copy:     $BUILD_DIR/${ZIP_BASE}-${DATE}.zip"
+    log "Package ZIP:   $zip_file"
+    log "Commit Link:   $BUILD_DIR/${COMMIT_HASH}.zip"
+    log "Latest Link:   $BUILD_DIR/latest.zip"
+    log "Branch Link:   $BUILD_DIR/${KERNEL_NAME}-${KERNEL_VERSION}-${VERSION_NAME}-${GIT_BRANCH}-${DEVICE_CODENAME}.zip"
     log "Kernel Image:  $BUILD_DIR/Image.gz-dtb"
     log "================================================="
 }
