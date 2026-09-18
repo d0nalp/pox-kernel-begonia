@@ -23,13 +23,42 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The repository intentionally keeps the large WireGuard compatibility
+      # tree out of the kernel source. Populate it during CI for Linux 4.14.
+      - name: Import WireGuard 4.14 Compatibility Source
+        shell: bash
+        run: |
+          set -euo pipefail
+          WG_REF=3d3c92b4711b42169137b2ddf42ed4382e2babdf
+          git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git /tmp/wireguard-linux-compat
+          git -C /tmp/wireguard-linux-compat fetch --depth 1 origin "$WG_REF"
+          git -C /tmp/wireguard-linux-compat checkout --detach "$WG_REF"
+          rm -rf net/wireguard
+          cp -a /tmp/wireguard-linux-compat/src net/wireguard
+          test -f net/wireguard/Kbuild
+          test -f net/wireguard/Kconfig
+          test -f net/wireguard/compat/compat.h
+
+      - name: Enable WireGuard in Kernel Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^source "net/wireguard/Kconfig"$' net/Kconfig || \
+            sed -i '/^if INET$/,/^endif # if INET$/ { /^if INET$/a source "net/wireguard/Kconfig"\n}' net/Kconfig
+          grep -q '^obj-$(CONFIG_WIREGUARD).*wireguard/' net/Makefile || \
+            sed -i '/^obj-$(CONFIG_NETFILTER)/a obj-$(CONFIG_WIREGUARD) += wireguard/' net/Makefile
+          for config in arch/arm64/configs/begonia_apatch_defconfig arch/arm64/configs/begonia_user_defconfig; do
+            grep -q '^CONFIG_WIREGUARD=' "$config" || echo 'CONFIG_WIREGUARD=y' >> "$config"
+          done
+          grep -n 'WIREGUARD\|wireguard' net/Kconfig net/Makefile arch/arm64/configs/begonia_*_defconfig
+
       - name: Install Host Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache curl flex g++-multilib \
-            gcc-multilib git gnupg gperf libelf-dev libssl-dev lz4 \
-            make zip python3 python-is-python3 libncurses5-dev libncurses5
+            bc bison build-essential ccache curl dwarves flex g++-multilib \
+            gcc-multilib git gnupg gperf libelf-dev libssl-dev lz4 make m4 zip \
+            python3 python-is-python3 libncurses5-dev libncurses5
 
       - name: Setup CCache
         uses: actions/cache@v4
@@ -51,7 +80,7 @@ jobs:
             kerdevdep/lib
             kerdevdep/bin
             kerdevdep/env.sh
-          key: kerdevdep-toolchains-v1
+          key: kerdevdep-toolchains-v2-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build Pox Kernel & Flashable Zip
         id: build_kernel
@@ -86,13 +115,13 @@ jobs:
           TAG_NAME="Pox-0.9-${EDITION}-${BRANCH_NAME}-${COMMIT_SHORT}"
           RELEASE_TITLE="Pox Kernel 0.9 [${EDITION}] - ${BRANCH_NAME} (${COMMIT_SHORT})"
 
-          echo "ZIP_PATH=$ZIP_PATH" >> $GITHUB_ENV
-          echo "ZIP_NAME=$(basename "$ZIP_PATH")" >> $GITHUB_ENV
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
-          echo "RELEASE_TITLE=$RELEASE_TITLE" >> $GITHUB_ENV
-          echo "EDITION=$EDITION" >> $GITHUB_ENV
-          echo "EDITION_DESC=$EDITION_DESC" >> $GITHUB_ENV
-          echo "COMMIT_SHORT=$COMMIT_SHORT" >> $GITHUB_ENV
+          echo "ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=$(basename "$ZIP_PATH")" >> "$GITHUB_ENV"
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=$RELEASE_TITLE" >> "$GITHUB_ENV"
+          echo "EDITION=$EDITION" >> "$GITHUB_ENV"
+          echo "EDITION_DESC=$EDITION_DESC" >> "$GITHUB_ENV"
+          echo "COMMIT_SHORT=$COMMIT_SHORT" >> "$GITHUB_ENV"
 
       - name: Generate Release Notes
         run: |
@@ -110,17 +139,11 @@ jobs:
           - **SoC**: MediaTek MT6785 / Helio G90T
           - **Linux Version**: 4.14.357 LTS
           - **Toolchain**: Google Android Clang 11.0.1 (r383902) + GCC 4.9 AArch64
-          - **APatch / KernelPatch**: Supported (\`CONFIG_KALLSYMS_ALL=y\`)
+          - **WireGuard**: Linux compatibility backport $WG_REF
 
           ### Release Assets
-          - **Flashable Recovery ZIP**: \`${{ env.ZIP_NAME }}\` (Install via TWRP / OrangeFox)
+          - **Flashable Recovery ZIP**: \`${{ env.ZIP_NAME }}\`
           - **Kernel Binary**: \`Image.gz-dtb\`
-
-          ### Flashing Guide
-          1. Reboot to Custom Recovery (TWRP, OrangeFox, PBRP).
-          2. (Recommended) Perform a NANDroid backup of the \`Boot\` partition.
-          3. Flash \`${{ env.ZIP_NAME }}\`.
-          4. Reboot system.
 
           ---
           ### Commit Log
