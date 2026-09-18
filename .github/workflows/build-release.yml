@@ -62,6 +62,72 @@ jobs:
           echo "WG_REF=$WG_REF" >> "$GITHUB_ENV"
 
       # ============================================================
+      # Fix WireGuard 4.14 __kernel_timespec Compatibility
+      # ============================================================
+      - name: Fix WireGuard 4.14 timespec Compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COMPAT="net/wireguard/compat/compat.h"
+
+          python3 - "$COMPAT" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text(encoding="utf-8")
+
+          old = """#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+          struct __kernel_timespec {
+          \tint64_t tv_sec, tv_nsec;
+          };
+          #elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0)
+          #include <linux/time64.h>
+          #ifdef __kernel_timespec
+          #undef __kernel_timespec
+          struct __kernel_timespec {
+          \tint64_t tv_sec, tv_nsec;
+          };
+          #endif
+          #endif"""
+
+          new = """#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+          #ifndef __kernel_timespec
+          struct __kernel_timespec {
+          \tint64_t tv_sec, tv_nsec;
+          };
+          #endif
+          #elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0)
+          #include <linux/time64.h>
+          #ifdef __kernel_timespec
+          #undef __kernel_timespec
+          struct __kernel_timespec {
+          \tint64_t tv_sec, tv_nsec;
+          };
+          #endif
+          #endif"""
+
+          if old not in text:
+              raise SystemExit(
+                  "ERROR: Expected __kernel_timespec compatibility block "
+                  "was not found."
+              )
+
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding="utf-8")
+
+          print("Fixed __kernel_timespec compatibility for Linux 4.14.")
+          PY
+
+          echo "===== Patched __kernel_timespec block ====="
+          grep -n -A14 -B2 \
+            'LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)' \
+            "$COMPAT"
+
+          test -f "$COMPAT"
+
+      # ============================================================
       # Enable WireGuard
       # ============================================================
       - name: Enable WireGuard in Kernel Build
