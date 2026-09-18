@@ -43,15 +43,38 @@ if [[ ! -f "anykernel/anykernel.sh" ]]; then
     rm -rf ak3-tmp ak3.zip anykernel/.github
 fi
 
-# 4. Fetch host utilities if missing
-if [[ ! -x "usr/bin/bison" || ! -x "usr/bin/flex" ]]; then
+# 4. Fetch host utilities if missing. Do not use a single apt-get download
+# command here: package names differ between Ubuntu releases (for example,
+# libdw1t64 exists on newer Ubuntu but not on Ubuntu 22.04).
+if [[ ! -x "usr/bin/bison" || ! -x "usr/bin/flex" || \
+      ! -x "usr/bin/m4" || ! -x "usr/bin/pahole" || \
+      ! -x "usr/bin/ccache" ]]; then
     log "Fetching host utilities (bison, flex, m4, pahole, ccache, libelf) ..."
     mkdir -p .deb_cache
     (
         cd .deb_cache
-        apt-get download bison flex m4 pahole libbpf1 libdw1t64 libelf1t64 libelf-dev ccache libfl2 libfl-dev libssl-dev libssl3t64 libhiredis1.1.0 2>/dev/null || true
-        for deb in *.deb; do
-            [[ -f "$deb" ]] && dpkg-deb -x "$deb" ../
+        packages=(
+            bison flex m4 pahole ccache
+            libbpf1 libdw1 libelf1 libelf-dev libfl2 libfl-dev
+            libssl-dev libssl3 libhiredis1.1.0
+        )
+        for package in "${packages[@]}"; do
+            if apt-cache show "$package" >/dev/null 2>&1; then
+                apt-get download "$package" || {
+                    echo "[kerdevdep] warning: unable to download $package" >&2
+                }
+            else
+                echo "[kerdevdep] warning: package unavailable on this runner: $package" >&2
+            fi
+        done
+        shopt -s nullglob
+        debs=( *.deb )
+        if (( ${#debs[@]} == 0 )); then
+            echo "[kerdevdep] error: no host utility packages were downloaded" >&2
+            exit 1
+        fi
+        for deb in "${debs[@]}"; do
+            dpkg-deb -x "$deb" ../
         done
     )
     rm -rf .deb_cache
@@ -70,7 +93,7 @@ chmod +x bin/bison
 
 cat << 'WRAPPERS' > bin/yacc
 #!/usr/bin/env bash
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 exec "$SELF_DIR/bison" -y "$@"
 WRAPPERS
 chmod +x bin/yacc
