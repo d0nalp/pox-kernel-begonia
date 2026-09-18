@@ -1,165 +1,20 @@
-name: Pox Kernel Build & Release
+- name: Enable WireGuard in Kernel Build
+  shell: bash
+  run: |
+    set -euo pipefail
 
-on:
-  push:
-    branches:
-      - '**'
-  workflow_dispatch:
+    grep -q '^source "net/wireguard/Kconfig"$' net/Kconfig || \
+      sed -i '/^if INET$/a\source "net/wireguard/Kconfig"' net/Kconfig
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    grep -q '^obj-$(CONFIG_WIREGUARD).*wireguard/' net/Makefile || \
+      sed -i '/^obj-$(CONFIG_NETFILTER)/a obj-$(CONFIG_WIREGUARD) += wireguard/' net/Makefile
 
-jobs:
-  build:
-    name: Build & Release Pox Kernel
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+    for config in arch/arm64/configs/begonia_apatch_defconfig arch/arm64/configs/begonia_user_defconfig; do
+      grep -q '^CONFIG_WIREGUARD=' "$config" || \
+        echo 'CONFIG_WIREGUARD=y' >> "$config"
+    done
 
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # The repository intentionally keeps the large WireGuard compatibility
-      # tree out of the kernel source. Populate it during CI for Linux 4.14.
-      - name: Import WireGuard 4.14 Compatibility Source
-        shell: bash
-        run: |
-          set -euo pipefail
-          WG_REF=3d3c92b4711b42169137b2ddf42ed4382e2babdf
-          git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git /tmp/wireguard-linux-compat
-          git -C /tmp/wireguard-linux-compat fetch --depth 1 origin "$WG_REF"
-          git -C /tmp/wireguard-linux-compat checkout --detach "$WG_REF"
-          rm -rf net/wireguard
-          cp -a /tmp/wireguard-linux-compat/src net/wireguard
-          test -f net/wireguard/Kbuild
-          test -f net/wireguard/Kconfig
-          test -f net/wireguard/compat/compat.h
-
-      - name: Enable WireGuard in Kernel Build
-        shell: bash
-        run: |
-          set -euo pipefail
-          grep -q '^source "net/wireguard/Kconfig"$' net/Kconfig || \
-            sed -i '/^if INET$/,/^endif # if INET$/ { /^if INET$/a source "net/wireguard/Kconfig"\n}' net/Kconfig
-          grep -q '^obj-$(CONFIG_WIREGUARD).*wireguard/' net/Makefile || \
-            sed -i '/^obj-$(CONFIG_NETFILTER)/a obj-$(CONFIG_WIREGUARD) += wireguard/' net/Makefile
-          for config in arch/arm64/configs/begonia_apatch_defconfig arch/arm64/configs/begonia_user_defconfig; do
-            grep -q '^CONFIG_WIREGUARD=' "$config" || echo 'CONFIG_WIREGUARD=y' >> "$config"
-          done
-          grep -n 'WIREGUARD\|wireguard' net/Kconfig net/Makefile arch/arm64/configs/begonia_*_defconfig
-
-      - name: Install Host Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache curl dwarves flex g++-multilib \
-            gcc-multilib git gnupg gperf libelf-dev libssl-dev lz4 make m4 zip \
-            python3 python-is-python3 libncurses5-dev libncurses5
-
-      - name: Setup CCache
-        uses: actions/cache@v4
-        with:
-          path: build/.ccache
-          key: ccache-${{ github.ref_name }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ github.ref_name }}-
-            ccache-
-
-      - name: Cache Toolchain (kerdevdep)
-        uses: actions/cache@v4
-        with:
-          path: |
-            kerdevdep/clang
-            kerdevdep/gcc
-            kerdevdep/anykernel
-            kerdevdep/usr
-            kerdevdep/lib
-            kerdevdep/bin
-            kerdevdep/env.sh
-          key: kerdevdep-toolchains-v2-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Build Pox Kernel & Flashable Zip
-        id: build_kernel
-        run: |
-          export GITHUB_REF_NAME="${{ github.ref_name }}"
-          ./build.sh all
-
-          COMMIT_SHORT=$(git rev-parse --short HEAD)
-          ZIP_PATH=$(ls build/Pox-*-${COMMIT_SHORT}-*.zip 2>/dev/null | head -n 1 || ls build/Pox-*.zip | grep -v 'latest.zip' | head -n 1)
-
-          if [[ ! -f "$ZIP_PATH" ]]; then
-            echo "::error::Flashable zip not found in build directory"
-            exit 1
-          fi
-
-          BRANCH_NAME="${{ github.ref_name }}"
-          case "$BRANCH_NAME" in
-            main|granite)
-              EDITION="Granite"
-              EDITION_DESC="Rock-Solid Stability Edition"
-              ;;
-            obsidian)
-              EDITION="Obsidian"
-              EDITION_DESC="iOS-Style Compressed Memory Edition"
-              ;;
-            onyx|*)
-              EDITION="Onyx"
-              EDITION_DESC="Zero Frame-Drop Gaming Edition"
-              ;;
-          esac
-
-          TAG_NAME="Pox-0.9-${EDITION}-${BRANCH_NAME}-${COMMIT_SHORT}"
-          RELEASE_TITLE="Pox Kernel 0.9 [${EDITION}] - ${BRANCH_NAME} (${COMMIT_SHORT})"
-
-          echo "ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
-          echo "ZIP_NAME=$(basename "$ZIP_PATH")" >> "$GITHUB_ENV"
-          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
-          echo "RELEASE_TITLE=$RELEASE_TITLE" >> "$GITHUB_ENV"
-          echo "EDITION=$EDITION" >> "$GITHUB_ENV"
-          echo "EDITION_DESC=$EDITION_DESC" >> "$GITHUB_ENV"
-          echo "COMMIT_SHORT=$COMMIT_SHORT" >> "$GITHUB_ENV"
-
-      - name: Generate Release Notes
-        run: |
-          cat <<EOF > release_notes.md
-          # Pox Kernel 0.9 [${{ env.EDITION }} Edition]
-
-          > *"We aim for stability, not for anything else."*
-
-          ### Release Information
-          - **Edition**: ${{ env.EDITION }} (${{ env.EDITION_DESC }})
-          - **Version**: 0.9
-          - **Branch**: \`${{ github.ref_name }}\`
-          - **Commit**: \`${{ env.COMMIT_SHORT }}\`
-          - **Device**: Xiaomi Redmi Note 8 Pro (\`begonia\` / \`begonia_in\`)
-          - **SoC**: MediaTek MT6785 / Helio G90T
-          - **Linux Version**: 4.14.357 LTS
-          - **Toolchain**: Google Android Clang 11.0.1 (r383902) + GCC 4.9 AArch64
-          - **WireGuard**: Linux compatibility backport $WG_REF
-
-          ### Release Assets
-          - **Flashable Recovery ZIP**: \`${{ env.ZIP_NAME }}\`
-          - **Kernel Binary**: \`Image.gz-dtb\`
-
-          ---
-          ### Commit Log
-          EOF
-          git log -n 8 --pretty=format:"* %h - %s (%an)" >> release_notes.md
-          echo "" >> release_notes.md
-
-      - name: Publish GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${{ env.TAG_NAME }}" \
-            --title "${{ env.RELEASE_TITLE }}" \
-            --notes-file release_notes.md \
-            "${{ env.ZIP_PATH }}" \
-            "build/Image.gz-dtb" || \
-          gh release upload "${{ env.TAG_NAME }}" \
-            "${{ env.ZIP_PATH }}" \
-            "build/Image.gz-dtb" --clobber
+    grep -n 'WIREGUARD\|wireguard' \
+      net/Kconfig \
+      net/Makefile \
+      arch/arm64/configs/begonia_*_defconfig
